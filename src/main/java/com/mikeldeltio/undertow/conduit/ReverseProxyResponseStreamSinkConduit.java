@@ -16,41 +16,53 @@ public class ReverseProxyResponseStreamSinkConduit extends AbstractStreamSinkCon
 
 	private final HttpServerExchange exchange;
 
+	private final long responseContentLength;
+
+	private boolean processedResponse = false;
+
 	private ByteArrayOutputStream outputStream;
+
+	private byte[] bufferedResponse = new byte[] {};
 
 	public ReverseProxyResponseStreamSinkConduit(StreamSinkConduit next, HttpServerExchange exchange) {
 		super(next);
 		this.exchange = exchange;
-		long length = exchange.getResponseContentLength();
-		if (length <= 0L) {
+		this.responseContentLength = exchange.getResponseContentLength();
+		if (responseContentLength <= 0L) {
 			outputStream = new ByteArrayOutputStream();
 		} else {
-			if (length > Integer.MAX_VALUE) {
-				throw UndertowMessages.MESSAGES.responseTooLargeToBuffer(length);
+			if (responseContentLength > Integer.MAX_VALUE) {
+				throw UndertowMessages.MESSAGES.responseTooLargeToBuffer(responseContentLength);
 			}
-			outputStream = new ByteArrayOutputStream((int) length);
+			outputStream = new ByteArrayOutputStream((int) responseContentLength);
 		}
 	}
 
 	@Override
 	public int write(ByteBuffer src) throws IOException {
-		int start = src.position();
-		for (int i = start; i < start + src.limit(); ++i) {
-			outputStream.write(src.get(i));
-		}
-		outputStream.flush();
-		if (outputStream.size() > 0) {
-			doLogResponse(exchange, outputStream);
+		if (!processedResponse) {
+			byte[] response = new byte[src.remaining()];
+			src.mark();
+			src.get(response);
+			src.reset();
+			bufferedResponse = ByteBuffer.allocate(bufferedResponse.length + response.length).put(bufferedResponse)
+					.put(response).array();
+			if (responseContentLength == bufferedResponse.length) {
+				doLogResponse(exchange, outputStream);
+				processedResponse = true;
+			}
 		}
 		return super.write(src);
 	}
 
 	@Override
 	public void terminateWrites() throws IOException {
-		if (outputStream.size() <= 0) {
-			doLogResponse(exchange, outputStream);
+		if (!processedResponse) {
+			if (outputStream.size() <= 0) {
+				doLogResponse(exchange, outputStream);
+			}
+			outputStream.close();
 		}
-		outputStream.close();
 		super.terminateWrites();
 	}
 
