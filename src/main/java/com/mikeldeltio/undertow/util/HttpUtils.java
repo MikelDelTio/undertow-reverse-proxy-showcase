@@ -15,8 +15,6 @@ public class HttpUtils {
 
 	private static final Logger LOGGER = Logger.getLogger(HttpUtils.class);
 
-	private static final long MAX_BUFFERED_SIZE = 8 * 1024; // 8k
-
 	public static String readRequestBody(HttpServerExchange exchange) {
 		PooledByteBuffer bufferPool = exchange.getConnection().getByteBufferPool().allocate();
 		ByteBuffer buffer = bufferPool.getBuffer();
@@ -31,7 +29,7 @@ public class HttpUtils {
 			if (bufferPool != null && bufferPool.isOpen()) {
 				IoUtils.safeClose(bufferPool);
 			}
-			e.printStackTrace();
+			LOGGER.error(e);
 		}
 		Connectors.ungetRequestBytes(exchange, bufferPool);
 		Connectors.resetRequestChannel(exchange);
@@ -41,10 +39,6 @@ public class HttpUtils {
 			LOGGER.error(exception);
 			return new String();
 		}
-	}
-
-	public static boolean shouldBufferContent(long length) {
-		return (length >= 0) && (length < MAX_BUFFERED_SIZE);
 	}
 
 	private static byte[] getByteArrayFromByteBuffer(ByteBuffer buffer) {
