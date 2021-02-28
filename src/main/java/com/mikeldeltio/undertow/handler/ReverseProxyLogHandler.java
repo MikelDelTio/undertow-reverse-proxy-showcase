@@ -8,7 +8,6 @@ import static io.undertow.UndertowMessages.MESSAGES;
 import static io.undertow.util.SameThreadExecutor.INSTANCE;
 import static java.util.concurrent.TimeUnit.SECONDS;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.concurrent.CompletableFuture;
@@ -74,13 +73,12 @@ public class ReverseProxyLogHandler implements HttpHandler {
 		return future;
 	}
 
-	public static void doLogResponse(HttpServerExchange exchange, ByteArrayOutputStream outputStream)
-			throws IOException {
-		HttpLogMessage httpLogMessage = getHttpLogMessage(exchange);
-		httpLogMessage.setStatusCode(exchange.getStatusCode());
-		httpLogMessage.setResponseHeaders(exchange.getResponseHeaders().toString());
-		httpLogMessage.setResponseBody(new String(outputStream.toByteArray(), exchange.getResponseCharset()));
+	public static void doLogResponse(HttpServerExchange exchange, byte[] bufferedResponse) {
 		try {
+			HttpLogMessage httpLogMessage = getHttpLogMessage(exchange);
+			httpLogMessage.setStatusCode(exchange.getStatusCode());
+			httpLogMessage.setResponseHeaders(exchange.getResponseHeaders().toString());
+			httpLogMessage.setResponseBody(new String(bufferedResponse, exchange.getResponseCharset()));
 			LOGGER.info(mapper.writeValueAsString(httpLogMessage));
 		} catch (IOException exception) {
 			LOGGER.error(exception);

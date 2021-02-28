@@ -1,15 +1,14 @@
 package com.mikeldeltio.undertow.conduit;
 
 import static com.mikeldeltio.undertow.handler.ReverseProxyLogHandler.doLogResponse;
+import static com.mikeldeltio.undertow.util.HttpUtils.shouldBufferContent;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
 import org.xnio.conduits.AbstractStreamSinkConduit;
 import org.xnio.conduits.StreamSinkConduit;
 
-import io.undertow.UndertowMessages;
 import io.undertow.server.HttpServerExchange;
 
 public class ReverseProxyResponseStreamSinkConduit extends AbstractStreamSinkConduit<StreamSinkConduit> {
@@ -20,7 +19,7 @@ public class ReverseProxyResponseStreamSinkConduit extends AbstractStreamSinkCon
 
 	private boolean processedResponse = false;
 
-	private ByteArrayOutputStream outputStream;
+	private boolean readResponse;
 
 	private byte[] bufferedResponse = new byte[] {};
 
@@ -28,28 +27,29 @@ public class ReverseProxyResponseStreamSinkConduit extends AbstractStreamSinkCon
 		super(next);
 		this.exchange = exchange;
 		this.responseContentLength = exchange.getResponseContentLength();
-		if (responseContentLength <= 0L) {
-			outputStream = new ByteArrayOutputStream();
+		if (shouldBufferContent(responseContentLength)) {
+			readResponse = true;
 		} else {
-			if (responseContentLength > Integer.MAX_VALUE) {
-				throw UndertowMessages.MESSAGES.responseTooLargeToBuffer(responseContentLength);
-			}
-			outputStream = new ByteArrayOutputStream((int) responseContentLength);
+			readResponse = false;
 		}
 	}
 
 	@Override
 	public int write(ByteBuffer src) throws IOException {
 		if (!processedResponse) {
-			byte[] response = new byte[src.remaining()];
-			src.mark();
-			src.get(response);
-			src.reset();
-			bufferedResponse = ByteBuffer.allocate(bufferedResponse.length + response.length).put(bufferedResponse)
-					.put(response).array();
-			if (responseContentLength == bufferedResponse.length) {
-				doLogResponse(exchange, outputStream);
-				processedResponse = true;
+			if (readResponse) {
+				byte[] response = new byte[src.remaining()];
+				src.get(response);
+				int alreadyWrittenSize = bufferedResponse.length;
+				bufferedResponse = ByteBuffer.allocate(bufferedResponse.length + response.length).put(bufferedResponse)
+						.put(response).array();
+				if (responseContentLength == bufferedResponse.length) {
+					doLogResponse(exchange, bufferedResponse);
+					processedResponse = true;
+					return super.write(ByteBuffer.wrap(bufferedResponse)) - alreadyWrittenSize;
+				} else {
+					return bufferedResponse.length - alreadyWrittenSize;
+				}
 			}
 		}
 		return super.write(src);
@@ -58,10 +58,8 @@ public class ReverseProxyResponseStreamSinkConduit extends AbstractStreamSinkCon
 	@Override
 	public void terminateWrites() throws IOException {
 		if (!processedResponse) {
-			if (outputStream.size() <= 0) {
-				doLogResponse(exchange, outputStream);
-			}
-			outputStream.close();
+			doLogResponse(exchange, bufferedResponse);
+			processedResponse = true;
 		}
 		super.terminateWrites();
 	}
